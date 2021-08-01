@@ -2,16 +2,16 @@ import requests
 import re
 import json
 from datetime import datetime
+from dotenv import load_dotenv
+import os
 
-USERNAME = "spamming6@gmail.com"
-PASSWORD = "HtG4a!qnxTcP9NzFx7HpAy9g4*nDhBAo"
-WEBHOOK = "https://discord.com/api/webhooks/871062047864004669/ce8nQYNVUkaHQWl1TV-Czt74R5nTAdONH6AABSfeC-cScWQpP6wgkh6qeGV7QXA4OgAc"
+import errors
 
-common_headers = {
-    "user-agent": "user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
-}
+load_dotenv()
 
-latest_post_shortcode = ""
+USERNAME = os.environ["USERNAME"]
+PASSWORD = os.environ["PASSWORD"]
+WEBHOOK = os.environ["WEBHOOK"]
 
 session = requests.Session()
 
@@ -41,13 +41,17 @@ def login():
 
     authenticated = json.loads(r.text)
     if r.status_code == 200 and authenticated:
-        print("logged in")
+        pass
     else:
-        print(f"Could not log in. Code {r.status_code}")
+        raise errors.LoginFailed(r.status_code, authenticated)
 
 
 def getCsrftoken() -> str:
-    r = session.get("https://www.instagram.com/accounts/login", headers=common_headers)
+    headers = {
+        "user-agent": "user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
+    }
+
+    r = session.get("https://www.instagram.com/accounts/login", headers=headers)
 
     script = re.findall(r"window._sharedData = .*", r.text)
     if len(script) != 0:
@@ -56,20 +60,28 @@ def getCsrftoken() -> str:
 
     return str(script["config"]["csrf_token"])
 
+class User:
+    def __init__(self, handle: str, icon: str) -> None:
+        self.handle = handle
+        self.icon = icon
+        self.latest_post = ""
+
 
 class Post:
-    def __init__(self, handle, user_icon, shortcode, image, caption) -> None:
-        self.handle = handle
-        self.user_icon = user_icon
+    def __init__(self, user: User, shortcode: str, image: str, caption: str) -> None:
+        self.user = user
         self.shortcode = shortcode
         self.image = image
         self.caption = caption
 
 
 def get_posts(handle):
+    headers = {
+        "user-agent": "user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
+    }
     page_url = f"https://www.instagram.com/{handle}/"
 
-    r = session.get(page_url, verify=True, headers=common_headers)
+    r = session.get(page_url, verify=True, headers=headers)
 
     script = re.findall(r'"entry_data":.*', r.text)
     if len(script) != 0:
@@ -81,23 +93,24 @@ def get_posts(handle):
     user = script["entry_data"]["ProfilePage"][0]["graphql"]["user"]
     timeline = user["edge_owner_to_timeline_media"]["edges"]
 
+    current_user = User(handle, user["profile_pic_url"])
     posts = []
     for post in timeline:
         current_post = Post(
-            handle,
-            user["profile_pic_url"],
-            post["node"]["shortcode"],
-            post["node"]["display_url"],
-            post["node"]["edge_media_to_caption"]["edges"][0]["node"]["text"],
+            user=current_user,
+            shortcode=post["node"]["shortcode"],
+            image=post["node"]["display_url"],
+            caption=post["node"]["edge_media_to_caption"]["edges"][0]["node"]["text"],
         )
         posts.append(current_post)
 
     return posts
 
 
-def get_latest_post(handle):
+def get_latest_post(user: User, handle: str):
     posts = get_posts(handle)
-    if latest_post_shortcode != posts[0].shortcode:
+    if user.latest_post != posts[0].shortcode:
+        user.latest_post = posts[0].shortcode
         data = make_embed(posts[0])
         send_webhook(data)
 
@@ -108,14 +121,14 @@ def make_embed(post):
         "avatar_url": "https://media.discordapp.net/attachments/734938642790744097/871175923083386920/insta.png",
         "embeds": [
             {
-                "title": f"New post by @{post.handle}",
+                "title": f"New post by @{post.user.handle}",
                 "url": f"https://www.instagram.com/p/{post.shortcode}/",
                 "color": 13453419,
                 "image": {"url": post.image},
                 "fields": [{"name": "Caption", "value": post.caption, "inline": False}],
                 "footer": {
-                    "text": post.handle,
-                    "icon_url": post.user_icon,
+                    "text": post.user.handle,
+                    "icon_url": post.user.user_icon,
                 },
             }
         ],
@@ -128,5 +141,9 @@ def send_webhook(data):
     requests.post(WEBHOOK, json=data)
 
 
-login()
+try:
+    login()
+except errors.LoginFailed as e:
+    print(f"Login failed. Code{e}")
+
 posts = get_latest_post("undefeatedinc")
