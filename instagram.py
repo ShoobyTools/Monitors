@@ -15,6 +15,10 @@ WEBHOOK = os.environ["WEBHOOK"]
 
 session = requests.Session()
 
+user_list = []
+with open("users.txt") as f:
+    for line in f:
+        user_list.append(line.strip())
 
 def login():
     token = getCsrftoken()
@@ -107,7 +111,7 @@ def get_posts(handle):
     return posts
 
 
-def get_latest_post(user: User, handle: str):
+def get_latest_post(user: User, handle: str) -> None:
     posts = get_posts(handle)
     if user.latest_post != posts[0].shortcode:
         user.latest_post = posts[0].shortcode
@@ -115,7 +119,7 @@ def get_latest_post(user: User, handle: str):
         send_webhook(data)
 
 
-def make_embed(post):
+def make_embed(post) -> None:
     data = {
         "username": "Instagram Monitor",
         "avatar_url": "https://media.discordapp.net/attachments/734938642790744097/871175923083386920/insta.png",
@@ -137,7 +141,7 @@ def make_embed(post):
     return data
 
 
-def send_webhook(data):
+def send_webhook(data) -> None:
     requests.post(WEBHOOK, json=data)
 
 
@@ -146,4 +150,5 @@ try:
 except errors.LoginFailed as e:
     print(f"Login failed. Code{e}")
 
-posts = get_latest_post("undefeatedinc")
+for user in user_list:
+    get_latest_post(user)
