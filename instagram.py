@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from dotenv import load_dotenv
 import os
+import time
 
 import errors
 
@@ -12,13 +13,11 @@ load_dotenv()
 USERNAME = os.environ["USERNAME"]
 PASSWORD = os.environ["PASSWORD"]
 WEBHOOK = os.environ["WEBHOOK"]
+MONITOR_FREQUENCY = os.environ["MONITOR_FREQUENCY"]
 
 session = requests.Session()
 
 user_list = []
-with open("users.txt") as f:
-    for line in f:
-        user_list.append(line.strip())
 
 def login():
     token = getCsrftoken()
@@ -64,22 +63,28 @@ def getCsrftoken() -> str:
 
     return str(script["config"]["csrf_token"])
 
-class User:
-    def __init__(self, handle: str, icon: str) -> None:
-        self.handle = handle
-        self.icon = icon
-        self.latest_post = ""
-
-
 class Post:
-    def __init__(self, user: User, shortcode: str, image: str, caption: str) -> None:
-        self.user = user
+    def __init__(self, shortcode: str, image: str, caption: str) -> None:
         self.shortcode = shortcode
         self.image = image
         self.caption = caption
 
 
-def get_posts(handle):
+class User:
+    def __init__(self) -> None:
+        self.handle = None
+        self.icon = None
+        self.latest_post = None
+
+    def set_post(self, latest_post: Post):
+        self.latest_post = latest_post
+    
+    def update_info(self, page):
+        self.handle = page["username"]
+        self.icon = page["profile_pic_url"]
+
+
+def get_page_info(handle):
     headers = {
         "user-agent": "user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
     }
@@ -94,45 +99,58 @@ def get_posts(handle):
         script = "{" + script
         script = json.loads(script)
 
-    user = script["entry_data"]["ProfilePage"][0]["graphql"]["user"]
-    timeline = user["edge_owner_to_timeline_media"]["edges"]
+    page = script["entry_data"]["ProfilePage"][0]["graphql"]["user"]
 
-    current_user = User(handle, user["profile_pic_url"])
-    posts = []
-    for post in timeline:
-        current_post = Post(
-            user=current_user,
-            shortcode=post["node"]["shortcode"],
-            image=post["node"]["display_url"],
-            caption=post["node"]["edge_media_to_caption"]["edges"][0]["node"]["text"],
-        )
-        posts.append(current_post)
-
-    return posts
+    return page
 
 
-def get_latest_post(user: User, handle: str) -> None:
-    posts = get_posts(handle)
-    if user.latest_post != posts[0].shortcode:
-        user.latest_post = posts[0].shortcode
-        data = make_embed(posts[0])
-        send_webhook(data)
+# get the latest post on a user's timeline
+def get_latest_post(page) -> Post:
+    timeline = page["edge_owner_to_timeline_media"]["edges"][0]["node"]
+
+    latest_post = Post(
+        shortcode=timeline["shortcode"],
+        image=timeline["display_url"],
+        caption=timeline["edge_media_to_caption"]["edges"][0]["node"]["text"],
+    )
+
+    return latest_post
+
+# initialize User objects for each handle get the latest post for each one
+def init():
+    with open("users.txt") as f:
+        for line in f:
+            handle = line.strip()
+            page = get_page_info(handle)
+            latest_post = get_latest_post(page)
+            current_user = User()
+            current_user.update_info(page)
+            current_user.set_post(latest_post)
+
+            user_list.append(current_user)
 
 
-def make_embed(post) -> None:
+
+def send(user: User):
+    data = make_embed(user)
+    send_webhook(data)
+
+
+def make_embed(user: User) -> None:
+    post = user.latest_post
     data = {
-        "username": "Instagram Monitor",
+        "username": "Instagram",
         "avatar_url": "https://media.discordapp.net/attachments/734938642790744097/871175923083386920/insta.png",
         "embeds": [
             {
-                "title": f"New post by @{post.user.handle}",
+                "title": f"New post by @{user.handle}",
                 "url": f"https://www.instagram.com/p/{post.shortcode}/",
                 "color": 13453419,
                 "image": {"url": post.image},
                 "fields": [{"name": "Caption", "value": post.caption, "inline": False}],
                 "footer": {
-                    "text": post.user.handle,
-                    "icon_url": post.user.user_icon,
+                    "text": user.handle,
+                    "icon_url": user.icon,
                 },
             }
         ],
@@ -145,10 +163,27 @@ def send_webhook(data) -> None:
     requests.post(WEBHOOK, json=data)
 
 
-try:
-    login()
-except errors.LoginFailed as e:
-    print(f"Login failed. Code{e}")
+def monitor():
+    while True:
+        for user in user_list:
+            page = get_page_info(user.handle)
+            current_latest_post = get_latest_post(page)
+            if user.latest_post.shortcode != current_latest_post.shortcode:
+                user.set_post(current_latest_post)
+                send(user)
+            
+            # sleep for 3 seconds after checking posts as to not spam
+            time.sleep(5)
 
-for user in user_list:
-    get_latest_post(user)
+        time.sleep(MONITOR_FREQUENCY)
+
+def start():
+    try:
+        login()
+    except errors.LoginFailed as e:
+        print(f"Login failed. Code{e}")
+
+    init()
+    monitor()
+
+start()
