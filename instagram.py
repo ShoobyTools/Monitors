@@ -118,9 +118,11 @@ def get_latest_post(page) -> Post:
 
 # initialize User objects for each handle get the latest post for each one
 def init():
+    all_handles = "```"
     with open("users.txt") as f:
         for line in f:
             handle = line.strip()
+            all_handles += f"\n{handle}"
             page = get_page_info(handle)
             latest_post = get_latest_post(page)
             current_user = User()
@@ -129,9 +131,25 @@ def init():
 
             user_list.append(current_user)
 
+            time.sleep(5)
+    all_handles += "```"
+
+    data = {
+        "username": "Instagram",
+        "avatar_url": "https://media.discordapp.net/attachments/734938642790744097/871175923083386920/insta.png",
+        "embeds": [
+            {
+            "title": "Instagram monitor launched",
+            "color": 9059001,
+            "fields": [{"name": "Monitoring the following users", "value": all_handles, "inline": False}]
+            }
+        ]
+    }
+
+    send_webhook(data)
 
 
-def send(user: User):
+def send_post(user: User):
     data = make_embed(user)
     send_webhook(data)
 
@@ -170,14 +188,15 @@ def monitor():
             current_latest_post = get_latest_post(page)
             if user.latest_post.shortcode != current_latest_post.shortcode:
                 user.set_post(current_latest_post)
-                send(user)
+                send_post(user)
             
-            # sleep for 3 seconds after checking posts as to not spam
+            # sleep for 5 seconds after checking posts as to not spam
             time.sleep(5)
 
-        time.sleep(MONITOR_FREQUENCY)
+        time.sleep(int(MONITOR_FREQUENCY))
 
 def start():
+    # attempt to log in
     try:
         login()
     except errors.LoginFailed as e:
