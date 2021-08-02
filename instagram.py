@@ -122,6 +122,7 @@ def init():
     with open("users.txt") as f:
         for line in f:
             handle = line.strip()
+            print(f"INITIALIZED {handle}")
             all_handles += f"\n{handle}"
             page = get_page_info(handle)
             latest_post = get_latest_post(page)
@@ -132,6 +133,7 @@ def init():
             user_list.append(current_user)
 
             time.sleep(5)
+    print("DONE")
     all_handles += "```"
 
     data = {
