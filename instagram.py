@@ -5,6 +5,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 import os
 import time
+from itertools import cycle
+import random
+
 
 import errors
 
@@ -18,6 +21,45 @@ MONITOR_FREQUENCY = os.environ["MONITOR_FREQUENCY"]
 session = requests.Session()
 
 user_list = []
+proxy_list = []
+
+
+class Post:
+    def __init__(self, shortcode: str, images: list, caption: str) -> None:
+        self.shortcode = shortcode
+        self.images = images
+        self.caption = caption
+
+
+class User:
+    def __init__(self) -> None:
+        self.handle = None
+        self.icon = None
+        self.latest_post = None
+
+    def set_post(self, latest_post: Post):
+        self.latest_post = latest_post
+
+    def update_info(self, page):
+        self.handle = page["username"]
+        self.icon = page["profile_pic_url"]
+
+
+def get_proxy_list():
+    response = requests.get(
+        "https://proxylist.geonode.com/api/proxy-list?limit=50&page=1&sort_by=lastChecked&sort_type=desc&country=US&protocols=https"
+    ).json()
+
+    for item in response["data"]:
+        proxy = f"https://{item['ip']}:{item['port']}"
+        proxy_list.append(proxy)
+
+    print(proxy_list)
+
+
+def get_random_proxy() -> str:
+    return proxy_list[random.randint(0, len(proxy_list) - 1)]
+
 
 def login():
     token = getCsrftoken()
@@ -63,32 +105,16 @@ def getCsrftoken() -> str:
 
     return str(script["config"]["csrf_token"])
 
-class Post:
-    def __init__(self, shortcode: str, image: str, caption: str) -> None:
-        self.shortcode = shortcode
-        self.image = image
-        self.caption = caption
-
-
-class User:
-    def __init__(self) -> None:
-        self.handle = None
-        self.icon = None
-        self.latest_post = None
-
-    def set_post(self, latest_post: Post):
-        self.latest_post = latest_post
-    
-    def update_info(self, page):
-        self.handle = page["username"]
-        self.icon = page["profile_pic_url"]
-
 
 def get_page_info(handle):
     headers = {
         "user-agent": "user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
     }
     page_url = f"https://www.instagram.com/{handle}/"
+
+    # proxy = {
+    #     "https": get_random_proxy()
+    # }
 
     r = session.get(page_url, verify=True, headers=headers)
 
@@ -106,15 +132,23 @@ def get_page_info(handle):
 
 # get the latest post on a user's timeline
 def get_latest_post(page) -> Post:
-    timeline = page["edge_owner_to_timeline_media"]["edges"][0]["node"]
+    latest = page["edge_owner_to_timeline_media"]["edges"][0]["node"]
+    images = []
+
+    if "edge_sidecar_to_children" in latest.keys():
+        for image in latest["edge_sidecar_to_children"]["edges"]:
+            images.append(image["node"]["display_url"])
+    else:
+        images[0] = latest["display_url"]
 
     latest_post = Post(
-        shortcode=timeline["shortcode"],
-        image=timeline["display_url"],
-        caption=timeline["edge_media_to_caption"]["edges"][0]["node"]["text"],
+        shortcode=latest["shortcode"],
+        images=images,
+        caption=latest["edge_media_to_caption"]["edges"][0]["node"]["text"],
     )
 
     return latest_post
+
 
 # initialize User objects for each handle get the latest post for each one
 def init():
@@ -137,15 +171,18 @@ def init():
     all_handles += "```"
 
     data = {
-        "username": "Instagram",
-        "avatar_url": "https://media.discordapp.net/attachments/734938642790744097/871175923083386920/insta.png",
+        "timestamp": str(datetime.utcnow()),
+        "footer": {
+            "icon_url": "https://media.discordapp.net/attachments/734938642790744097/871175923083386920/insta.png",
+            "text": "Instagram",
+        },
         "embeds": [
             {
-            "title": "Instagram monitor launched",
-            "color": 9059001,
-            "fields": [{"name": "Monitoring the following users", "value": all_handles, "inline": False}]
+                "title": "Instagram monitor launched",
+                "color": 9059001,
+                "description": f"Monitoring the following users{all_handles}",
             }
-        ]
+        ],
     }
 
     send_webhook(data)
@@ -158,23 +195,36 @@ def send_post(user: User):
 
 def make_embed(user: User) -> None:
     post = user.latest_post
+
+    post_url = f"https://www.instagram.com/p/{post.shortcode}/"
     data = {
-        "username": "Instagram",
-        "avatar_url": "https://media.discordapp.net/attachments/734938642790744097/871175923083386920/insta.png",
         "embeds": [
             {
                 "title": f"New post by @{user.handle}",
-                "url": f"https://www.instagram.com/p/{post.shortcode}/",
+                "description": post.caption,
                 "color": 13453419,
-                "image": {"url": post.image},
-                "fields": [{"name": "Caption", "value": post.caption, "inline": False}],
-                "footer": {
-                    "text": user.handle,
+                "author": {
+                    "name": user.handle,
+                    "url": f"https://www.instagram.com/{user.handle}/",
                     "icon_url": user.icon,
                 },
-            }
+                "timestamp": str(datetime.utcnow()),
+                "footer": {
+                    "icon_url": "https://media.discordapp.net/attachments/734938642790744097/871175923083386920/insta.png",
+                    "text": "Instagram",
+                },
+                "url": post_url,
+                "image": {"url": post.images[0]},
+            },
         ],
     }
+    if len(post.images) > 1: 
+        for image in post.images[1:]:
+            image_data = {
+                "url": post_url,
+                "image": {"url": image},
+            }
+            data["embeds"].append(image_data)
 
     return data
 
@@ -188,23 +238,26 @@ def monitor():
         for user in user_list:
             page = get_page_info(user.handle)
             current_latest_post = get_latest_post(page)
-            if user.latest_post.shortcode != current_latest_post.shortcode:
+            if user.latest_post.shortcode == current_latest_post.shortcode:
                 user.set_post(current_latest_post)
                 send_post(user)
-            
+
             # sleep for 5 seconds after checking posts as to not spam
-            time.sleep(5)
+            # time.sleep(5)
 
         time.sleep(int(MONITOR_FREQUENCY))
 
+
 def start():
+    # get_proxy_list()
     # attempt to log in
     try:
         login()
     except errors.LoginFailed as e:
-        print(f"Login failed. Code{e}")
+        print(f"Login failed. Code {e}")
 
     init()
     monitor()
+
 
 start()
