@@ -46,15 +46,13 @@ class User:
 
 
 def get_proxy_list():
-    response = requests.get(
-        "https://proxylist.geonode.com/api/proxy-list?limit=50&page=1&sort_by=lastChecked&sort_type=desc&country=US&protocols=https"
-    ).json()
-
-    for item in response["data"]:
-        proxy = f"https://{item['ip']}:{item['port']}"
-        proxy_list.append(proxy)
-
-    print(proxy_list)
+    with open("proxies.txt") as f:
+        content = f.readlines()
+    for line in content:
+        proxy = line.split(":")
+        password = proxy[3].strip("\n")
+        formatted = f"http://{proxy[2]}:{password}@{proxy[0]}:{proxy[1]}"
+        proxy_list.append(formatted)
 
 
 def get_random_proxy() -> str:
@@ -112,11 +110,11 @@ def get_page_info(handle):
     }
     page_url = f"https://www.instagram.com/{handle}/"
 
-    # proxy = {
-    #     "https": get_random_proxy()
-    # }
+    proxy = {
+        "http": get_random_proxy()
+    }
 
-    r = session.get(page_url, verify=True, headers=headers)
+    r = session.get(page_url, verify=True, headers=headers, proxies=proxy)
 
     script = re.findall(r'"entry_data":.*', r.text)
     if len(script) != 0:
@@ -139,7 +137,7 @@ def get_latest_post(page) -> Post:
         for image in latest["edge_sidecar_to_children"]["edges"]:
             images.append(image["node"]["display_url"])
     else:
-        images[0] = latest["display_url"]
+        images.append(latest["display_url"])
 
     latest_post = Post(
         shortcode=latest["shortcode"],
@@ -249,7 +247,7 @@ def monitor():
 
 
 def start():
-    # get_proxy_list()
+    get_proxy_list()
     # attempt to log in
     try:
         login()
@@ -258,6 +256,5 @@ def start():
 
     init()
     monitor()
-
 
 start()
