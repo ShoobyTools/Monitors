@@ -5,7 +5,6 @@ from datetime import datetime
 from dotenv import load_dotenv
 import os
 import time
-from itertools import cycle
 import random
 
 
