@@ -44,20 +44,6 @@ class User:
         self.icon = page["profile_pic_url"]
 
 
-def get_proxy_list():
-    with open("proxies.txt") as f:
-        content = f.readlines()
-    for line in content:
-        proxy = line.split(":")
-        password = proxy[3].strip("\n")
-        formatted = f"http://{proxy[2]}:{password}@{proxy[0]}:{proxy[1]}"
-        proxy_list.append(formatted)
-
-
-def get_random_proxy() -> str:
-    return proxy_list[random.randint(0, len(proxy_list) - 1)]
-
-
 def login():
     token = getCsrftoken()
 
@@ -109,11 +95,7 @@ def get_page_info(handle):
     }
     page_url = f"https://www.instagram.com/{handle}/"
 
-    proxy = {
-        "http": get_random_proxy()
-    }
-
-    r = session.get(page_url, verify=True, headers=headers, proxies=proxy)
+    r = session.get(page_url, verify=True, headers=headers)
 
     script = re.findall(r'"entry_data":.*', r.text)
     if len(script) != 0:
@@ -235,18 +217,17 @@ def monitor():
         for user in user_list:
             page = get_page_info(user.handle)
             current_latest_post = get_latest_post(page)
-            if user.latest_post.shortcode == current_latest_post.shortcode:
+            if user.latest_post.shortcode != current_latest_post.shortcode:
                 user.set_post(current_latest_post)
                 send_post(user)
 
             # sleep for 5 seconds after checking posts as to not spam
-            # time.sleep(5)
+            time.sleep(5)
 
         time.sleep(int(MONITOR_FREQUENCY))
 
 
 def start():
-    get_proxy_list()
     # attempt to log in
     try:
         login()
